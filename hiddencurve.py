@@ -6,18 +6,19 @@ import numpy as np
 
 class ECC:
     def __init__(self, p, a, b, g, n):
-        self.p = p  
-        self.a = a  
-        self.b = b 
-        self.g = g  
-        self.n = n  
+        self.p = p
+        self.a = a
+        self.b = b
+        self.g = g
+        self.n = n
 
     def add(self, P, Q):
-        
-        if P == (0, 0):
+        if P == (0, 0):  
             return Q
-        if Q == (0, 0):
+        if Q == (0, 0):  
             return P
+        if P[0] == Q[0] and P[1] != Q[1]:  
+            return (0, 0)
 
         if P != Q:
             lambd = (Q[1] - P[1]) * pow(Q[0] - P[0], -1, self.p) % self.p
@@ -38,14 +39,12 @@ class ECC:
                 R = self.add(R, P)
         return R
 
-
 p = 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f
 a = 0
 b = 7
 g = (55066263022277343669578718895168534326250603453732580969419399252653644613,
      93807190528502704734438820432045625694355265803661227653698390517638372054)
 n = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141
-
 
 curve = ECC(p, a, b, g, n)
 
@@ -55,9 +54,14 @@ def generate_keys():
     return private_key, public_key
 
 def encrypt_message(message, public_key):
+    
     shared_key_point = curve.multiply(public_key[0], g)
     shared_key = shared_key_point[0]  
-    shared_key_bytes = hashlib.sha256(str(shared_key).encode()).digest()
+
+    shared_key_bytes = b""
+    while len(shared_key_bytes) < len(message):
+        shared_key_bytes += hashlib.sha256((str(shared_key) + str(len(shared_key_bytes))).encode()).digest()
+
     encrypted_message = bytes([m ^ k for m, k in zip(message.encode("utf-8"), shared_key_bytes)])
     return encrypted_message
 
@@ -65,7 +69,11 @@ def decrypt_message(encrypted_message, private_key):
     public_key = curve.multiply(private_key, g)
     shared_key_point = curve.multiply(public_key[0], g)
     shared_key = shared_key_point[0]
-    shared_key_bytes = hashlib.sha256(str(shared_key).encode()).digest()
+
+    shared_key_bytes = b""
+    while len(shared_key_bytes) < len(encrypted_message):
+        shared_key_bytes += hashlib.sha256((str(shared_key) + str(len(shared_key_bytes))).encode()).digest()
+
     decrypted_message = ''.join([chr(m ^ k) for m, k in zip(encrypted_message, shared_key_bytes)])
     return decrypted_message
 
@@ -87,12 +95,11 @@ def embed_message(image_path, message, output_path, public_key):
     flat_img = img_array.flatten()
 
     for i in range(len(full_binary_message)):
-        current_pixel = int(flat_img[i])  
-        current_pixel &= ~1              
-        new_pixel = current_pixel | int(full_binary_message[i])  
-        flat_img[i] = np.uint8(new_pixel)  
+        current_pixel = int(flat_img[i])
+        current_pixel &= ~1
+        new_pixel = current_pixel | int(full_binary_message[i])
+        flat_img[i] = np.uint8(new_pixel)
 
-    
     img_array = flat_img.reshape(img_array.shape)
     img_with_message = Image.fromarray(img_array)
     img_with_message.save(output_path)
@@ -105,17 +112,13 @@ def extract_message(image_path, private_key):
 
     flat_img = img_array.flatten()
 
-    
-    binary_message = ""
-    for i in range(len(flat_img)):
-        current_pixel = int(flat_img[i]) 
-        binary_message += str(current_pixel & 1)  
-
-    binary_length = binary_message[:16]
+    binary_length = "".join(str(int(flat_img[i]) & 1) for i in range(16))
     message_length = int(binary_length, 2)
 
-    encrypted_message_binary = binary_message[16:16 + (message_length * 8)]
-    encrypted_message = bytes(int(encrypted_message_binary[i:i + 8], 2) for i in range(0, len(encrypted_message_binary), 8))
+    binary_message = "".join(str(int(flat_img[i]) & 1) for i in range(16, 16 + (message_length * 8)))
+    encrypted_message = bytes(
+        int(binary_message[i:i + 8], 2) for i in range(0, len(binary_message), 8)
+    )
 
     decrypted_message = decrypt_message(encrypted_message, private_key)
 
